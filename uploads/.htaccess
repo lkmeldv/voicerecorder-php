@@ -1,0 +1,21 @@
+# Sécurité pour le dossier uploads
+# Empêcher l'exécution de scripts
+
+# Désactiver l'exécution PHP
+php_flag engine off
+
+# Types MIME autorisés uniquement
+<FilesMatch "\.(wav|mp3|ogg|webm|json)$">
+    Order allow,deny
+    Allow from all
+</FilesMatch>
+
+# Bloquer tous les autres types de fichiers
+<FilesMatch "\.(?!wav|mp3|ogg|webm|json$)[^.]+$">
+    Order deny,allow
+    Deny from all
+</FilesMatch>
+
+# Headers de sécurité
+Header always set X-Content-Type-Options nosniff
+Header always set Content-Security-Policy "default-src 'none'; media-src 'self';"
