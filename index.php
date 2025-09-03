@@ -32,10 +32,12 @@ if (rand(1, 20) === 1) {
     }
 }
 
-// Traitement de l'upload
+// Variables d'état
+$play_mode = false;
 $message = '';
 $error = '';
 $share_url = '';
+$my_recordings = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['audio'])) {
     try {
@@ -104,15 +106,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['audio'])) {
     }
 }
 
+// Traitement des actions utilisateur
+if (isset($_POST['action'])) {
+    $action = $_POST['action'];
+    
+    switch ($action) {
+        case 'update_note':
+            if (isset($_POST['file_id']) && isset($_POST['note'])) {
+                $file_id = preg_replace('/[^a-zA-Z0-9_]/', '', $_POST['file_id']);
+                $note_file = $upload_dir . $file_id . '.json';
+                
+                if (file_exists($note_file)) {
+                    $audio_info = json_decode(file_get_contents($note_file), true);
+                    $audio_info['comment'] = trim($_POST['note']);
+                    file_put_contents($note_file, json_encode($audio_info, JSON_PRETTY_PRINT));
+                    $message = 'Note mise à jour avec succès !';
+                }
+            }
+            break;
+            
+        case 'delete_recording':
+            if (isset($_POST['file_id'])) {
+                $file_id = preg_replace('/[^a-zA-Z0-9_]/', '', $_POST['file_id']);
+                $audio_file = glob($upload_dir . $file_id . '.*');
+                
+                foreach ($audio_file as $file) {
+                    @unlink($file);
+                }
+                $message = 'Enregistrement supprimé avec succès !';
+            }
+            break;
+    }
+}
+
 // Affichage d'un enregistrement partagé
 $play_audio = null;
 if (isset($_GET['play'])) {
+    $play_mode = true;
     $play_id = preg_replace('/[^a-zA-Z0-9_]/', '', $_GET['play']);
     $play_file = $upload_dir . $play_id . '.json';
     
     if (file_exists($play_file)) {
         $play_audio = json_decode(file_get_contents($play_file), true);
+        
+        // Incrémenter le compteur de vues
+        if (!isset($play_audio['views'])) {
+            $play_audio['views'] = 0;
+        }
+        $play_audio['views']++;
+        file_put_contents($play_file, json_encode($play_audio, JSON_PRETTY_PRINT));
     }
+}
+
+// Affichage de la liste des enregistrements
+if (isset($_GET['my_recordings'])) {
+    $json_files = glob($upload_dir . '*.json');
+    foreach ($json_files as $json_file) {
+        $audio_info = json_decode(file_get_contents($json_file), true);
+        if ($audio_info) {
+            $my_recordings[] = $audio_info;
+        }
+    }
+    // Trier par date de création (plus récent en premier)
+    usort($my_recordings, function($a, $b) {
+        return strtotime($b['upload_date']) - strtotime($a['upload_date']);
+    });
 }
 ?>
 <!DOCTYPE html>
@@ -375,6 +433,99 @@ if (isset($_GET['play'])) {
             font-size: 0.9em;
         }
         
+        .speed-btn {
+            background: #f8f9fa;
+            color: #333;
+            border: 2px solid #dee2e6;
+            padding: 8px 16px;
+            margin: 0 5px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: bold;
+        }
+        
+        .speed-btn:hover {
+            background: #e9ecef;
+            transform: translateY(-1px);
+        }
+        
+        .speed-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+        
+        .recordings-list {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .recording-item {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #667eea;
+        }
+        
+        .recording-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .edit-btn {
+            background: #ffa502;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        
+        .delete-btn {
+            background: #ff3742;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        
+        .nav-btn {
+            background: #3742fa;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            margin: 10px 5px;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s ease;
+        }
+        
+        .nav-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(55, 66, 250, 0.3);
+        }
+        
+        .note-input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 5px 0;
+            font-family: inherit;
+        }
+        
         @media (max-width: 600px) {
             .container {
                 padding: 30px 20px;
@@ -412,6 +563,7 @@ if (isset($_GET['play'])) {
                 <h3>📅 <?= htmlspecialchars($play_audio['upload_date']) ?></h3>
                 <p>Nom original: <?= htmlspecialchars($play_audio['original_name']) ?></p>
                 <p>Taille: <?= number_format($play_audio['size'] / 1024, 1) ?> KB</p>
+                <p>👁️ Vues: <?= isset($play_audio['views']) ? $play_audio['views'] : 1 ?></p>
                 
                 <?php if (!empty($play_audio['comment'])): ?>
                 <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #667eea;">
@@ -420,10 +572,19 @@ if (isset($_GET['play'])) {
                 </div>
                 <?php endif; ?>
                 
-                <audio controls style="width: 100%; margin: 20px 0;">
-                    <source src="<?= $upload_dir . htmlspecialchars($play_audio['filename']) ?>" type="<?= htmlspecialchars($play_audio['mime_type']) ?>">
-                    Votre navigateur ne supporte pas l'audio HTML5.
-                </audio>
+                <div class="audio-controls-section" style="margin: 20px 0;">
+                    <div class="speed-controls" style="margin-bottom: 15px; text-align: center;">
+                        <label style="margin-right: 10px; font-weight: bold;">Vitesse de lecture:</label>
+                        <button onclick="setPlaybackRate(1)" class="speed-btn active" id="speed1">x1</button>
+                        <button onclick="setPlaybackRate(1.5)" class="speed-btn" id="speed15">x1.5</button>
+                        <button onclick="setPlaybackRate(2)" class="speed-btn" id="speed2">x2</button>
+                    </div>
+                    
+                    <audio controls id="mainAudio" style="width: 100%;">
+                        <source src="<?= $upload_dir . htmlspecialchars($play_audio['filename']) ?>" type="<?= htmlspecialchars($play_audio['mime_type']) ?>">
+                        Votre navigateur ne supporte pas l'audio HTML5.
+                    </audio>
+                </div>
                 
                 <div>
                     <a href="<?= $upload_dir . htmlspecialchars($play_audio['filename']) ?>" download="<?= htmlspecialchars($play_audio['original_name']) ?>" class="download-btn">
@@ -432,7 +593,58 @@ if (isset($_GET['play'])) {
                 </div>
             </div>
             
-            <p><a href="index.php" style="color: #667eea;">← Créer un nouvel enregistrement</a></p>
+            <p>
+                <a href="index.php" class="nav-btn" style="margin-right: 10px;">← Nouvel enregistrement</a>
+                <a href="index.php?my_recordings=1" class="nav-btn">📋 Mes enregistrements</a>
+            </p>
+            
+        <?php elseif (!empty($my_recordings)): ?>
+            <!-- Mode visualisation des enregistrements -->
+            <h1>📋 Mes Enregistrements</h1>
+            <p class="subtitle">Gérez vos enregistrements vocaux</p>
+            
+            <?php if ($message): ?>
+                <div class="alert success">
+                    ✅ <?= htmlspecialchars($message) ?>
+                </div>
+            <?php endif; ?>
+            
+            <?php if ($error): ?>
+                <div class="alert error">
+                    ❌ <?= htmlspecialchars($error) ?>
+                </div>
+            <?php endif; ?>
+            
+            <div class="recordings-list">
+                <?php foreach ($my_recordings as $recording): ?>
+                    <div class="recording-item">
+                        <h4>🎧 <?= htmlspecialchars($recording['original_name']) ?></h4>
+                        <p><strong>Date:</strong> <?= htmlspecialchars($recording['upload_date']) ?></p>
+                        <p><strong>Taille:</strong> <?= number_format($recording['size'] / 1024, 1) ?> KB</p>
+                        <p><strong>Vues:</strong> <?= isset($recording['views']) ? $recording['views'] : 0 ?></p>
+                        
+                        <?php if (!empty($recording['comment'])): ?>
+                        <div style="background: #e3f2fd; padding: 10px; border-radius: 5px; margin: 10px 0;">
+                            <strong>💬 Note:</strong> <?= nl2br(htmlspecialchars($recording['comment'])) ?>
+                        </div>
+                        <?php endif; ?>
+                        
+                        <div class="recording-actions">
+                            <button class="edit-btn" onclick="editNote('<?= $recording['id'] ?>', '<?= htmlspecialchars(addslashes($recording['comment'] ?? '')) ?>')">✏️ Éditer la note</button>
+                            <a href="index.php?play=<?= $recording['id'] ?>" class="nav-btn" style="padding: 6px 12px; margin: 0; font-size: 0.9em; text-decoration: none;">🎧 Écouter</a>
+                            <button class="delete-btn" onclick="deleteRecording('<?= $recording['id'] ?>', '<?= htmlspecialchars($recording['original_name']) ?>')">🗑️ Supprimer</button>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+                
+                <?php if (empty($my_recordings)): ?>
+                    <p style="text-align: center; color: #666; padding: 40px;">Aucun enregistrement trouvé</p>
+                <?php endif; ?>
+            </div>
+            
+            <p style="text-align: center;">
+                <a href="index.php" class="nav-btn">← Créer un enregistrement</a>
+            </p>
             
         <?php else: ?>
             <!-- Mode enregistrement normal -->
@@ -507,6 +719,10 @@ if (isset($_GET['play'])) {
                     🔄 Nouveau
                 </button>
             </div>
+            
+            <div style="text-align: center; margin-top: 30px;">
+                <a href="index.php?my_recordings=1" class="nav-btn">📋 Voir mes enregistrements</a>
+            </div>
         <?php endif; ?>
     </div>
     
@@ -514,6 +730,7 @@ if (isset($_GET['play'])) {
     <script>
         let mediaRecorder;
         let audioChunks = [];
+        let currentPlaybackRate = 1;
         let isRecording = false;
         let isPaused = false;
         let startTime;
@@ -844,6 +1061,80 @@ if (isset($_GET['play'])) {
                 audioContext.close();
             }
         }
+        
+        // Gestion de la vitesse de lecture
+        function setPlaybackRate(rate) {
+            currentPlaybackRate = rate;
+            const audio = document.getElementById('mainAudio');
+            if (audio) {
+                audio.playbackRate = rate;
+            }
+            
+            // Mettre à jour les boutons de vitesse
+            document.querySelectorAll('.speed-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            if (rate === 1) document.getElementById('speed1').classList.add('active');
+            else if (rate === 1.5) document.getElementById('speed15').classList.add('active');
+            else if (rate === 2) document.getElementById('speed2').classList.add('active');
+        }
+        
+        // Édition des notes
+        function editNote(fileId, currentNote) {
+            const newNote = prompt('💬 Modifier la note:', currentNote || '');
+            if (newNote !== null) {
+                const formData = new FormData();
+                formData.append('action', 'update_note');
+                formData.append('file_id', fileId);
+                formData.append('note', newNote);
+                
+                fetch('index.php?my_recordings=1', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.text())
+                .then(() => {
+                    window.location.reload();
+                })
+                .catch(error => {
+                    console.error('Erreur:', error);
+                    alert('❌ Erreur lors de la mise à jour de la note');
+                });
+            }
+        }
+        
+        // Suppression d'enregistrement
+        function deleteRecording(fileId, fileName) {
+            if (confirm(`⚠️ Êtes-vous sûr de vouloir supprimer l'enregistrement "${fileName}" ?\n\nCette action est irréversible.`)) {
+                const formData = new FormData();
+                formData.append('action', 'delete_recording');
+                formData.append('file_id', fileId);
+                
+                fetch('index.php?my_recordings=1', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.text())
+                .then(() => {
+                    window.location.reload();
+                })
+                .catch(error => {
+                    console.error('Erreur:', error);
+                    alert('❌ Erreur lors de la suppression');
+                });
+            }
+        }
+        
+        // Initialiser la vitesse de lecture au chargement de la page
+        document.addEventListener('DOMContentLoaded', function() {
+            const audio = document.getElementById('mainAudio');
+            if (audio) {
+                audio.addEventListener('loadedmetadata', function() {
+                    audio.playbackRate = currentPlaybackRate;
+                });
+            }
+        });
         
         // Vérifier les capacités du navigateur
         if (statusEl && (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)) {
